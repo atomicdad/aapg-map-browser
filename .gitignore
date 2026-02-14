@@ -3,3 +3,28 @@
 /.venv/
 /AAPGMapBrowser.spec
 /MapsFileBuilder.spec
+
+# PyCharm / IntelliJ files
+.idea/
+*.iml
+
+# Python-specific ignores (very common)
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
