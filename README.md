@@ -1,3 +1,6 @@
+AAPG Map Browser
+-------
+
 <p align="center">
   <img src="/.github/aapg_map_browser.png" width="500"/>
 </p>
@@ -14,8 +17,9 @@ Setup
 -------
 Windows:
 
+![GitHub Release](https://img.shields.io/github/v/release/atomicdad/aapg-map-browser)
  1. Download the latest release and unzip it where you would like to
-    keep the application.
+   keep the application.
  2. Open the game, connect to a server, login as admin. Wait 10-15 seconds. Close game.
  3. Open a Windows Terminal window and navigate to the unzipped folder.
 
