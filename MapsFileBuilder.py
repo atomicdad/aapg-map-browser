@@ -2,6 +2,12 @@
 """
 AAPG Map Browser – AAClient.log to maps.ini converter
 Parses AAClient.log and writes a clean maps.ini for the AAPG Map Browser.
+
+Requirements:
+    None
+Optional:
+    pyinstaller - to compile as self-contained executable
+        Windows: pyinstaller --onefile --clean MapsFileBuilder.py
 """
 
 import argparse

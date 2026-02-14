@@ -12,11 +12,8 @@ Windows:
 
 Optional:
     pyinstaller - to compile as self-contained executables
-        AAPGMapBrowser
-            Windows: pyinstaller --onefile --clean --noconsole --icon=assets/aapgmb.ico --add-data "assets/aapgmb.ico:assets" --add-data "assets/aapgmb.png:assets" AAPGMapBrowser.py
-            Linux:   pyinstaller --onefile --clean --noconsole --add-data "assets/aapgmb.png:assets" AAPGMapBrowser.py
-        MapsFileBuilder
-            Windows: pyinstaller --onefile --clean MapsFileBuilder.py
+        Windows: pyinstaller --onefile --clean --noconsole --icon=assets/aapgmb.ico --add-data "assets/aapgmb.ico:assets" --add-data "assets/aapgmb.png:assets" AAPGMapBrowser.py
+        Linux:   pyinstaller --onefile --clean --noconsole --add-data "assets/aapgmb.png:assets" AAPGMapBrowser.py
 """
 
 __version__ = "1.1"
