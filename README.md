@@ -17,7 +17,6 @@ Setup
 -------
 Windows:
 
-![GitHub Release](https://img.shields.io/github/v/release/atomicdad/aapg-map-browser)
  1. Download the latest release and unzip it where you would like to
    keep the application.
  2. Open the game, connect to a server, login as admin. Wait 10-15 seconds. Close game.
