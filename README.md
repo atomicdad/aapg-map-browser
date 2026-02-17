@@ -9,9 +9,9 @@ Overview
 --------
 The in-game map browser for America's Army Proving Grounds is horribly inconvenient. The list view is too small and offers no search/favorites/filtering. (hopefully in the next update) This tool aims to solve these shortcomings.
 
-*Note: This tool is primarily intended for server admins, but also includes game commands that do not require admin. Currently, maps lists can only be generated with admin access to a server. Future versions may include the ability to generate a map list for all locally installed maps.*
+*Note: This tool is primarily intended for server admins, but also includes game commands that do not require admin. For example, all installed maps can be listed and opened locally from the tool.*
 
-AAPG Map Browser is a window that runs alongside the game. It interacts with the game via the in-game console. Quite simply, for every submitted command, it focuses the game window, opens the console, types the chosen command, and presses enter. When setup properly it has a list of every available map on a server. 
+AAPG Map Browser is a window that runs alongside the game. It interacts with the game via the in-game console. Quite simply, for every submitted command, it focuses the game window, opens the console, types the chosen command, and presses enter. It does not tamper with game memory in any way. All commands sent to the game console are commands that could be typed by you. This just makes it faster and convenient.
 
 Setup
 -------
@@ -19,31 +19,39 @@ Windows:
 
  1. Download the latest release and unzip it where you would like to
    keep the application.
- 2. Open the game, connect to a server, login as admin. Wait 10-15 seconds. Close game.
- 3. Open a Windows Terminal window and navigate to the unzipped folder.
 
-    ```bash
-    cd 'C:\Users\(Username)\Desktop\AAPG Map Browser v1.1\'
-    ```
-    
- 5. Run MapsFileBuilder.exe with AAClient.log as the only argument.
 
-    ```bash
-    .\MapsFileBuilder.exe 'C:\Users\(Username)\Documents\My Games\America''s Army Proving Grounds\AAGame\Logs\AAClient.log'
-    ```
- 
- 7. If successful, a maps.ini file will be created or overwritten in the root directory of the application.
- 8. Open AAPG Map Browser.exe and verify that Maps Count matches the number of maps on the server.
+ 2. Run "AAPG Map Browser.exe".
 
 Usage
 -------
-The application is fairly straight-forward once setup. Map Filters excludes maps from the list that do not meet the selected criteria. Clean names removes the unique identifier number Steam uses on the map files to make it easier to read. Pick Random Map randomly highlights a map from the current list. It does not submit anything to the game.
+The application use is fairly straight-forward. The dropdown in the upper left is the currently selected map list. You can create a new one under the 'File' menu with 'New', create a copy of the current list with 'Save As', or keep 'Default' and overwrite it. This allows for creating lists for multiple servers where available maps may differ.
 
-Favorites can be toggled by right-clicking on a map in the list view. These can then be filtered with the Favorites filter.
+Creating Map Lists:
 
-Game Commands are used to send commands to the in-game console. The Vote section does not require admin and will work without it if the server allows it. Admin commands obviously require logging in as admin prior to submission. The Open Map option under Local will open a map locally on the client.
+If you would like to create your own map list, a couple of paths need to be set in 'Settings' under 'Folder Paths'. The first is the path to 'AAClient.log'. This is used to extract map names for a server for which you have admin access. The second is 'AA Workshop Content'. This is the folder that contains all of your locally downloaded Steam Workshop maps.
 
-*Note: After logging in as admin it may take 10-15 seconds before the server enumerates the available maps to the client. An attempted map change before this happens will fail. Also, it is unconfirmed but possible that a map change command submitted just as the map change countdown completes may result in a server crash or unjoinable state. This has been experienced once, but it may have been a coincidence. Try to submit a map change before the timer gets below 1.*
+*Note: If you are a server admin and would like to create a list of maps for your server, understand that this software cannot see your admin password, nor will it ever ask for it. Logging in as admin on a server merely dumps the full list of maps on the server to AAClient.log. This software parses that file and stores the list.*
+
+Server Map Lists:
+
+Open the game, join your server, login as admin, wait 10-15 seconds, and then close the game. If done properly, the game server will have sent a list of all available maps to your AAClient.log. If the AACLient.log path has been set correctly (as described above), navigate to 'Map List' -> 'Get Server Maps'. This will refresh the currently selected map list with all the available maps for your server. You can save the list with 'File' -> 'Save'. This doesn't need to be done again until the maps on the server have changed.
+
+Local Map Lists:
+
+If the workshop content path has been set correctly (as described above), navigate to 'Map List' -> 'Get Local Maps'. This will refresh the currently selected map list with all the available maps on your computer. You can save the list with 'File' -> 'Save'.
+
+Map Filters:
+
+Map Filters excludes maps from the currently selected list that do not meet the selected criteria. Clean names removes the unique identifier number Steam uses on the map files to make it easier to read. Pick Random Map randomly highlights a map from the current list. It does not submit anything to the game.
+
+Favorites can be toggled by right-clicking on a map in the list view. These can then be filtered with the Favorites filter. Favorites are currently global. Your saved favorites will appear for any selected map list.
+
+Game Commands:
+
+Game Commands are used to send commands to the in-game console. The Vote section does not require admin and will work without it if the server allows it. Admin commands obviously require logging in as admin in game prior to submission (otherwise they will fail silently). The Open Map option under Local will open a map locally on the client.
+
+*Note: After logging in as admin it may take 10-15 seconds before the server enumerates the available maps to the game. An attempted map change before this happens will fail. Also, it is unconfirmed but possible that a map change command submitted just as the map change countdown completes may result in a server crash or unjoinable state. This has been experienced once, but it may have been a coincidence. Try to submit a map change before the timer gets below 1.*
 
 Disclaimer
 -------
