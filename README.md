@@ -17,7 +17,7 @@ Setup
 -------
 Windows:
 
- 1. Download the latest release and unzip it where you would like to
+ 1. Download the latest release [here](https://github.com/atomicdad/aapg-map-browser/releases) and unzip it where you would like to
    keep the application.
 
 
