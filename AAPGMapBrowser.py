@@ -16,7 +16,7 @@ Optional:
         Linux:   pyinstaller --onefile --clean --noconsole --add-data "assets/aapgmb.png:assets" AAPGMapBrowser.py
 """
 
-__version__ = "1.2b"
+__version__ = "1.2.1b"
 VERSION_STRING = f"v{__version__}"
 
 import tkinter as tk
@@ -985,6 +985,30 @@ class AAPGMapBrowser:
         )
 
     def create_new_map_list(self):
+
+        # ── Handle unsaved changes FIRST ─────────────────────────────────────
+
+        current_name = self.combo_file_var.get().strip()
+
+        if self.maps_dirty:
+            response = messagebox.askyesnocancel(
+                title="Unsaved Changes",
+                message=f"You have unsaved changes in '{current_name}'.\n\n"
+                        f"Do you want to save?",
+                icon="warning",
+                parent=self.root
+            )
+
+            if response is None:  # Cancel
+                return
+
+            if response is True:  # Yes → save under current (old) name
+                if not self.save_map_list():  # uses current combo value → old name
+                    messagebox.showwarning("Save failed", "Aborted because save failed.")
+                    return
+
+        self.maps_dirty = False
+
         """Menu: File → New"""
         name = tk.simpledialog.askstring(
             title="New Map List",
@@ -1182,6 +1206,10 @@ class AAPGMapBrowser:
                 return
 
         try:
+
+            if new_path.exists():
+                new_path.unlink()
+
             # Perform the rename on disk
             os.rename(old_path, new_path)
 
