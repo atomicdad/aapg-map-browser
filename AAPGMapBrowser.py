@@ -11,9 +11,12 @@ Windows:
     pywin32 - find and focus game window
 
 Optional:
-    pyinstaller - to compile as self-contained executables
+    pyinstaller - to compile as native executable
         Windows: pyinstaller --onefile --clean --noconsole --icon=assets/aapgmb.ico --add-data "assets/aapgmb.ico:assets" --add-data "assets/aapgmb.png:assets" AAPGMapBrowser.py
         Linux:   pyinstaller --onefile --clean --noconsole --add-data "assets/aapgmb.png:assets" AAPGMapBrowser.py
+
+    nuitka - to compile as native executable
+        Windows: python -m nuitka --mode=onefile --windows-console-mode=disable --windows-icon-from-ico=assets\aapgmb.png --enable-plugin=tk-inter --include-data-files=assets/aapgmb.png=assets/aapgmb.png --msvc=latest AAPGMapBrowser.py
 """
 
 __version__ = "1.2.1b"
@@ -75,42 +78,58 @@ DEFAULT_MAPS = [
     , "flo_worksite_ex", "leavenworthprison", "flo_stoneruins_c4"
 ]
 
+def is_frozen() -> bool:
+    """Detect if running as a frozen/bundled executable (PyInstaller or similar)."""
+    return getattr(sys, 'frozen', False)
+
+
+def is_nuitka() -> bool:
+    # Combine for broader detection
+    return (
+        hasattr(os, "__compiled__") or
+        "NUITKA_ONEFILE_PARENT" in os.environ or
+        "__compiled__" in globals()  # fallback, though often False in main
+    )
+
+
+def get_bundle_base_path() -> Path:
+    """
+    Returns the base path where bundled resources live at runtime.
+    - Plain Python: script's directory
+    - PyInstaller: sys._MEIPASS (temp unpack or bundle root)
+    - Nuitka: dirname(__file__) (temp unpack in onefile, dist folder in standalone)
+    """
+    if is_frozen() and hasattr(sys, '_MEIPASS'):
+        # PyInstaller (onefile or onedir)
+        return Path(sys._MEIPASS)
+
+    # Nuitka (onefile or standalone) or plain Python fallback
+    return Path(__file__).resolve().parent
+
+
+def resource_path(relative_path: str) -> Path:
+    """
+    Get absolute path to a bundled resource (e.g. 'assets/aapgmb.png').
+    Works for:
+    - python script
+    - PyInstaller (--onefile or folder mode)
+    - Nuitka (--onefile or --standalone)
+    """
+    base = get_bundle_base_path()
+    return base / relative_path
+
 
 def get_appdata_path(filename: str) -> Path:
-    """
-    Returns a Path to filename next to the .exe (even in --onefile mode).
-    Works in dev (python) and frozen exe.
-    """
-    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-        # Running as bundled exe
-        exe_dir = Path(sys.executable).resolve().parent
-    else:
-        # Running as python script
-        exe_dir = Path(__file__).resolve().parent
+    if getattr(sys, 'frozen', False) or is_nuitka():
+        # Frozen (PyInstaller/Nuitka): use launched exe path
+        if is_nuitka():
+            exe_path = sys.argv[0]
+        else:
+            exe_path = sys.executable if hasattr(sys, 'executable') and sys.executable else sys.argv[0]
+        return Path(exe_path).resolve().parent / filename
 
-    return exe_dir / filename
-
-def resource_path(relative_path):
-    """Get absolute path to resource"""
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except AttributeError:
-        base_path = os.path.abspath(".")
-
-    return os.path.join(base_path, relative_path)
-
-# def load_maps():
-#     maps = []
-#     if os.path.exists("maps.ini"):
-#         config = configparser.ConfigParser()
-#         config.read(str(get_appdata_path("maps.ini")), encoding='utf-8-sig')
-#         if "Maps" in config:
-#             maps = list(config["Maps"].keys())
-#     else:
-#         maps = DEFAULT_MAPS[:]
-#         print("maps.ini not found → using default map list")
-#     return maps
+    # Dev mode: next to script, ignore python.exe location
+    return Path(__file__).resolve().parent / filename
 
 def load_favorites():
     favorites = {}
@@ -719,6 +738,10 @@ class AAPGMapBrowser:
         target_name = self.combo_file_var.get().strip()
         self.current_map_list_name = target_name
 
+        if target_name and target_name != "No map lists found":
+            self.last_map_file = target_name
+            self.save_config()
+
         filename = f"ml_{target_name}.ini"
         if os.path.exists(filename):
             config = configparser.ConfigParser()
@@ -953,7 +976,7 @@ class AAPGMapBrowser:
                     if "MapNamePart" in line:
                         match = pattern.search(line)
                         if match:
-                            name = match.group(1).strip()
+                            name = match.group(1).strip().lower()
                             if name and name not in seen:
                                 seen.add(name)
                                 maps.append(name)
@@ -1053,7 +1076,7 @@ class AAPGMapBrowser:
         try:
             idx = self.file_selection_combo_box['values'].index(name)
             self.file_selection_combo_box.current(idx)
-            self.on_file_combo_changed()
+            self.perform_map_list_switch()
         except ValueError:
             pass  # should not happen, but safe
 
@@ -1103,16 +1126,7 @@ class AAPGMapBrowser:
         self.refresh_map_file_selection_combobox()
         self.current_map_list_name = name
 
-        try:
-            idx = self.file_selection_combo_box['values'].index(name)
-            self.file_selection_combo_box.current(idx)
-            self.on_file_combo_changed()
-            self.last_map_file = name
-            self.save_config()
-            self.maps_dirty = False
-            self.update_window_title()
-        except ValueError:
-            pass
+        self.perform_map_list_switch()
 
     def save_map_list(self):
         """Menu: File → Save"""
@@ -1291,7 +1305,7 @@ class AAPGMapBrowser:
             values = self.file_selection_combo_box['values']
             if values:
                 self.file_selection_combo_box.current(0)
-                self.on_file_combo_changed()
+                self.perform_map_list_switch()
             else:
                 # No lists left → fall back to default
                 self.combo_file_var.set("")
