@@ -45,6 +45,20 @@ Map List Options:
 
 Clean names removes the unique identifier number Steam uses on the map files to make it easier to read. Images enabled thumbnails in the list view and a larger preview image on hover.
 
+Adding Map Images:
+The application will search for .jpg images at the launch of the application. If it finds them it will resize and convert the image to a .webp, create a .webp thumbnail, and then delete the original .jpg.
+
+Locate a map without an image in the Map Browser. Open the game and take a Steam screenshot of the map with F12. Open Steam's screenshot viewer, right-click on the image, and click "Show on disk". This will open Windows Explorer with the screenshot selected. Copy or move it to the images folder in the AAPG Map Browser folder.
+
+Rename the screenshot with the map file name. You can easily get the map name by right-clicking the map in the map browser and selecting "Copy Filename".
+
+For example:
+   20260403190737_1.jpg -> flo_101stvilla$76561197971401004_ex.jpg
+
+Restart the map browser and the image should load.
+
+*Note: Avoid starting/restarting the map browser before you have renamed any loose .jpgs in the images folder. They will disappear and be converted to .webp files with the wrong filename. You will have to find them to correct the filename.*
+
 Map Filters:
 
 Map Filters excludes maps from the currently selected list that do not meet the selected criteria. Pick Random Map randomly highlights a map from the current list. It does not submit anything to the game.
