@@ -21,11 +21,11 @@ Windows:
    keep the application.
 
 
- 2. Run "AAPG Map Browser.exe".
+ 2. Run "AAPGMapBrowser.exe".
 
 Usage
 -------
-The application use is fairly straight-forward. The dropdown in the upper left is the currently selected map list. You can create a new one under the 'File' menu with 'New', create a copy of the current list with 'Save As', or keep 'Default' and overwrite it. This allows for creating lists for multiple servers where available maps may differ.
+The application is fairly straight-forward. The dropdown in the upper left is the currently selected map list. You can create a new one under the 'File' menu with 'New', create a copy of the current list with 'Save As', or keep 'Default' and overwrite it. This allows for creating lists for multiple servers where available maps may differ.
 
 Creating Map Lists:
 
@@ -41,15 +41,19 @@ Local Map Lists:
 
 If the workshop content path has been set correctly (as described above), navigate to 'Map List' -> 'Get Local Maps'. This will refresh the currently selected map list with all the available maps on your computer. You can save the list with 'File' -> 'Save'.
 
+Map List Options:
+
+Clean names removes the unique identifier number Steam uses on the map files to make it easier to read. Images enabled thumbnails in the list view and a larger preview image on hover.
+
 Map Filters:
 
-Map Filters excludes maps from the currently selected list that do not meet the selected criteria. Clean names removes the unique identifier number Steam uses on the map files to make it easier to read. Pick Random Map randomly highlights a map from the current list. It does not submit anything to the game.
+Map Filters excludes maps from the currently selected list that do not meet the selected criteria. Pick Random Map randomly highlights a map from the current list. It does not submit anything to the game.
 
 Favorites can be toggled by right-clicking on a map in the list view. These can then be filtered with the Favorites filter. Favorites are currently global. Your saved favorites will appear for any selected map list.
 
 Game Commands:
 
-Game Commands are used to send commands to the in-game console. The Vote section does not require admin and will work without it if the server allows it. Admin commands obviously require logging in as admin in game prior to submission (otherwise they will fail silently). The Open Map option under Local will open a map locally on the client.
+Game Commands are used to send commands to the in-game console. The Vote section does not require admin and will work without it if the server allows it. Admin commands obviously require logging in as admin in game prior to submission (otherwise they will fail silently). The Open Map option under Local will open a map locally (offline) on the client.
 
 *Note: After logging in as admin it may take 10-15 seconds before the server enumerates the available maps to the game. An attempted map change before this happens will fail. Also, it is unconfirmed but possible that a map change command submitted just as the map change countdown completes may result in a server crash or unjoinable state. This has been experienced once, but it may have been a coincidence. Try to submit a map change before the timer gets below 1.*
 

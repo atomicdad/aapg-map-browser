@@ -19,10 +19,14 @@ Optional:
         Windows: python -m nuitka --mode=onefile --windows-console-mode=disable --windows-icon-from-ico=assets\aapgmb.png --enable-plugin=tk-inter --include-data-files=assets/aapgmb.png=assets/aapgmb.png --msvc=latest AAPGMapBrowser.py
 """
 
-__version__ = "1.2.1b"
+__version__ = "1.3b"
+
+from PIL import ImageTk, ImageOps
+
 VERSION_STRING = f"v{__version__}"
 
 import tkinter as tk
+import PIL.Image as Image
 from tkinter import ttk, simpledialog, messagebox, Menu, filedialog
 from pathlib import Path
 import configparser
@@ -91,22 +95,6 @@ def is_nuitka() -> bool:
         "__compiled__" in globals()  # fallback, though often False in main
     )
 
-
-def get_bundle_base_path() -> Path:
-    """
-    Returns the base path where bundled resources live at runtime.
-    - Plain Python: script's directory
-    - PyInstaller: sys._MEIPASS (temp unpack or bundle root)
-    - Nuitka: dirname(__file__) (temp unpack in onefile, dist folder in standalone)
-    """
-    if is_frozen() and hasattr(sys, '_MEIPASS'):
-        # PyInstaller (onefile or onedir)
-        return Path(sys._MEIPASS)
-
-    # Nuitka (onefile or standalone) or plain Python fallback
-    return Path(__file__).resolve().parent
-
-
 def resource_path(relative_path: str) -> Path:
     """
     Get absolute path to a bundled resource (e.g. 'assets/aapgmb.png').
@@ -115,7 +103,13 @@ def resource_path(relative_path: str) -> Path:
     - PyInstaller (--onefile or folder mode)
     - Nuitka (--onefile or --standalone)
     """
-    base = get_bundle_base_path()
+
+    if is_frozen() and hasattr(sys, '_MEIPASS'):
+        # PyInstaller (onefile or onedir)
+        base = Path(sys._MEIPASS)
+    else:
+        base = Path(__file__).resolve().parent
+
     return base / relative_path
 
 
@@ -126,10 +120,16 @@ def get_appdata_path(filename: str) -> Path:
             exe_path = sys.argv[0]
         else:
             exe_path = sys.executable if hasattr(sys, 'executable') and sys.executable else sys.argv[0]
-        return Path(exe_path).resolve().parent / filename
+        if str != "":
+            return Path(exe_path).resolve().parent / filename
+        else:
+            return Path(exe_path).resolve().parent
 
     # Dev mode: next to script, ignore python.exe location
-    return Path(__file__).resolve().parent / filename
+    if str != "":
+        return Path(__file__).resolve().parent / filename
+    else:
+        return Path(__file__).resolve().parent
 
 def load_favorites():
     favorites = {}
@@ -240,16 +240,19 @@ def send_command_to_game(command: str):
 
 class AAPGMapBrowser:
     def __init__(self):
+        self.active_popup = None
         self.aaclient_log_found = False
         self.workshop_content_found = False
         self.context_menu = None
         self.action_var = None
         self.clean_var = None
+        self.thumb_var = None
         self.tree = None
         self.map_count_label = None
         self.search_edit = None
         self.search_var = None
         self.map_count_label_frame = None
+        self.filter_frame = None
         self.last_bdx = False
         self.last_flo = False
         self.flo_var = None
@@ -262,21 +265,28 @@ class AAPGMapBrowser:
         self.de_var = None
         self.c4_var = None
         self.ex_var = None
+        self.game_commands_frame = None
         self.maps_dirty = False
         self.last_shown_map_list_name = ""
         self.current_map_list_name = ""
+
+        self.images_dir = get_appdata_path("") / "images"
+        self.thumbs_dir = self.images_dir / "thumbnails"
+        self.hover_popup = None
+        self.hover_after_id = None
+        self.thumbnail_images = {}
         self.root = tk.Tk()
         self.root.title(f"AAPG: Map Browser {VERSION_STRING}")
-        self.root.geometry("585x655")
+        self.root.geometry("900x750")
         self.root.resizable(False, False)
 
-        # ── Config ────────────────────────────────────────────────────────
-        #self.config_path = Path(__file__).parent / "config.ini"
+        # ── Config ───────────────────────────────────────────────────────────
         self.config_path = str(get_appdata_path("config.ini"))
         self.aaclient_log_path = ""
         self.workshop_path = ""
         self.last_map_file = ""
         self.dark_mode = False
+        self.image_mode = False
         self.load_config()
         self.validate_paths()
 
@@ -314,9 +324,15 @@ class AAPGMapBrowser:
 
         self.favorites = load_favorites()
         self.selected_map = ""
-        self.map_action = 3  # default: set next map
+        self.map_action = 6  # default: set next map
 
         self.build_gui()
+
+        self.process_images()
+
+        if self.thumb_var.get():
+            self.preload_thumbnails()
+
         self.refresh_map_file_selection_combobox()
         self.current_map_list_name = self.combo_file_var.get().strip()
 
@@ -329,6 +345,20 @@ class AAPGMapBrowser:
 
         # Fix persistent blue highlight on readonly Combobox
         style = ttk.Style()
+
+        if self.image_mode:
+            style.configure("Treeview", rowheight=130)
+        else:
+            style.configure("Treeview", rowheight=25)
+
+        style.configure("Treeview", indent=4)  # Default is usually 20+. 4 is very tight.
+        style.layout("Treeview.Item",
+                     [('Treeitem.padding', {'sticky': 'nswe',
+                                            'children': [('Treeitem.image', {'sticky': 'w'}),
+                                                         ('Treeitem.text', {'sticky': 'w'})]})])
+
+        # Optional: even more aggressive padding control on items
+        style.configure("Treeview.Item", padding=(2, 4))
 
         if theme == "dark":
             style.map("TCombobox",
@@ -409,81 +439,97 @@ class AAPGMapBrowser:
         #self.menu_help.add_command(label="Report Issue/Bug")
 
         #Map List Frame
-        self.map_list_frame = ttk.LabelFrame(self.root, text="", width=388, height=618)
-        self.map_list_frame.place(x=7, y=10)
+        self.map_list_frame = ttk.LabelFrame(self.root, text="", width=702, height=723)
+        self.map_list_frame.place(x=7, y=0)
 
         # Map List File ComboBox
         self.combo_file_var = tk.StringVar(value="")
-        self.file_selection_combo_box = ttk.Combobox(self.root, textvariable=self.combo_file_var, values=["Temp"], state="readonly")
-        self.file_selection_combo_box.place(x=15, y=5)
+        self.file_selection_combo_box = ttk.Combobox(self.map_list_frame, textvariable=self.combo_file_var, values=["Temp"], state="readonly")
+        self.file_selection_combo_box.place(x=8, y=0)
         # Bind the change detector
         self.combo_file_var.trace_add("write", self.on_file_combo_about_to_change)
 
         # Search
         search_width = 0
         if os_name == "linux":
-            ttk.Label(self.root, text="Search:").place(x=15, y=49)
+            ttk.Label(self.map_list_frame, text="Search:").place(x=13, y=28)
             search_width = 23
         else:
-            ttk.Label(self.root, text="Search:").place(x=15, y=48)
-            search_width = 29
+            ttk.Label(self.map_list_frame, text="Search:").place(x=13+193, y=27-20)
+            search_width = 18
 
         self.search_var = tk.StringVar()
-        self.search_edit = ttk.Entry(self.root, textvariable=self.search_var, width=search_width)
+        self.search_edit = ttk.Entry(self.map_list_frame, textvariable=self.search_var, width=search_width)
 
         if os_name == "linux":
-            self.search_edit.place(x=69, y=43)
+            self.search_edit.place(x=67, y=22)
         else:
-            self.search_edit.place(x=67, y=42)
+            self.search_edit.place(x=65+190, y=21-20)
 
         self.search_edit.bind("<KeyRelease>", lambda e: self.update_listview())
 
         # Map count
-        self.map_count_label_frame = (ttk.LabelFrame(self.root, text="Map Count", width=85, height=38))
-        self.map_count_label_frame.place(x=296, y=34)
+        self.map_count_label_frame = (ttk.LabelFrame(self.map_list_frame, text="Map Count", width=85, height=38))
+        self.map_count_label_frame.place(x=280+125, y=13-20)
         self.map_count_label = ttk.Label(self.map_count_label_frame, text="0")
         self.map_count_label.place(x=10, y=0)
 
+        self.clean_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(self.map_list_frame, text="Clean names", variable=self.clean_var, command=self.update_listview).place(
+            x=578, y=2)
+        self.thumb_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(self.map_list_frame, text="Images", variable=self.thumb_var, command=self.toggle_image_mode).place(x=497, y=2)
+        self.thumb_var.set(self.image_mode)
+
         # ListView (Treeview)
         columns = ("hidden", "Map Name", "Type", "Mode", "Favorite")
-        self.tree = ttk.Treeview(self.root, columns=columns, show="headings", height=26)
-        self.tree.place(x=15, y=80, width=372, height=540)
+        self.tree = ttk.Treeview(self.map_list_frame, columns=columns, show="tree headings", height=26)
+        self.tree.place(x=8, y=38, width=686, height=662)
 
-        scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=self.tree.yview)
+        scrollbar = ttk.Scrollbar(self.map_list_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
 
-        scrollbar.place(x=15 + 350 + 4, y=115, height=500)
+        scrollbar.place(x=679, y=74, height=622)
 
+        self.tree.heading("#0", text="Image")
         self.tree.heading("hidden", text="")
         self.tree.heading("Map Name", text="Map Name")
         self.tree.heading("Type", text="Type")
         self.tree.heading("Mode", text="Mode")
         self.tree.heading("Favorite", text="Favorite")
 
-        self.tree.column("hidden", width=0, stretch=False)
-        self.tree.column("Map Name", width=190, anchor="w")
-        self.tree.column("Type", width=44, anchor="center")
-        self.tree.column("Mode", width=47, anchor="center")
-        self.tree.column("Favorite", width=70, anchor="center")
+        if self.image_mode:
+            self.tree.column("#0", width=233, stretch=False, anchor="center")
+            self.tree.column("Map Name", width=250, anchor="w")
+        else:
+            self.tree.column("#0", width=0, stretch=False, anchor="center")
+            self.tree.column("Map Name", width=483, anchor="w")
 
+        self.tree.column("hidden", width=0, stretch=False)
+        self.tree.column("Type", width=15, anchor="center")
+        self.tree.column("Mode", width=15, anchor="center")
+        self.tree.column("Favorite", width=15, anchor="center")
+
+        self.tree.bind("<Motion>", self.on_tree_hover)
+        self.tree.bind("<Leave>", self.on_tree_leave)
         self.tree.bind("<<TreeviewSelect>>", self.on_map_select)
         self.tree.bind("<Double-1>", lambda e: self.on_map_select(e))
         self.tree.bind("<Button-3>", self.show_context_menu)
 
         # Filters
-        filter_frame = ttk.LabelFrame(self.root, text="Map Filters:", width=148, height=234)
-        filter_frame.place(x=415, y=10)
+        self.filter_frame = ttk.LabelFrame(self.root, text="Map Filters:", width=148, height=234)
+        self.filter_frame.place(x=730, y=0)
 
         self.fav_var = tk.BooleanVar()
-        ttk.Checkbutton(self.root, text="Favorites", variable=self.fav_var, command=self.update_listview).place(x=428, y=25)
+        ttk.Checkbutton(self.filter_frame, text="Favorites", variable=self.fav_var, command=self.update_listview).place(x=13, y=0)
 
-        ttk.LabelFrame(self.root, text="Map Type:", width=125, height=50).place(x=426, y=51)
+        ttk.LabelFrame(self.filter_frame, text="Map Type:", width=125, height=50).place(x=11, y=26)
         self.bdx_var = tk.BooleanVar(value=False)
         self.flo_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(self.root, text="BDX", variable=self.bdx_var, command=self.on_maptype_click).place(x=428, y=68)
-        ttk.Checkbutton(self.root, text="FLO", variable=self.flo_var, command=self.on_maptype_click).place(x=488, y=68)
+        ttk.Checkbutton(self.filter_frame, text="BDX", variable=self.bdx_var, command=self.on_maptype_click).place(x=13, y=43)
+        ttk.Checkbutton(self.filter_frame, text="FLO", variable=self.flo_var, command=self.on_maptype_click).place(x=73, y=43)
 
-        ttk.LabelFrame(self.root, text="Game Mode:", width=125, height=128).place(x=426, y=105)
+        ttk.LabelFrame(self.filter_frame, text="Game Mode:", width=125, height=128).place(x=11, y=80)
         self.ex_var  = tk.BooleanVar()
         self.c4_var  = tk.BooleanVar()
         self.de_var  = tk.BooleanVar()
@@ -492,53 +538,248 @@ class AAPGMapBrowser:
         self.vip_var = tk.BooleanVar()
         self.cu_var  = tk.BooleanVar()
 
-        ttk.Checkbutton(self.root, text="EX",  variable=self.ex_var,  command=lambda: self.on_gamemode_click(self.ex_var)).place(x=428, y=123)
-        ttk.Checkbutton(self.root, text="C4",  variable=self.c4_var,  command=lambda: self.on_gamemode_click(self.c4_var)).place(x=428, y=149)
-        ttk.Checkbutton(self.root, text="DE",  variable=self.de_var,  command=lambda: self.on_gamemode_click(self.de_var)).place(x=428, y=175)
-        ttk.Checkbutton(self.root, text="AC",  variable=self.ac_var,  command=lambda: self.on_gamemode_click(self.ac_var)).place(x=428, y=201)
-        ttk.Checkbutton(self.root, text="TH",  variable=self.th_var,  command=lambda: self.on_gamemode_click(self.th_var)).place(x=488, y=123)
-        ttk.Checkbutton(self.root, text="VIP", variable=self.vip_var, command=lambda: self.on_gamemode_click(self.vip_var)).place(x=488, y=149)
-        ttk.Checkbutton(self.root, text="CU",  variable=self.cu_var,  command=lambda: self.on_gamemode_click(self.cu_var)).place(x=488, y=175)
+        ttk.Checkbutton(self.filter_frame, text="EX",  variable=self.ex_var,  command=lambda: self.on_gamemode_click(self.ex_var)).place(x=13, y=98)
+        ttk.Checkbutton(self.filter_frame, text="C4",  variable=self.c4_var,  command=lambda: self.on_gamemode_click(self.c4_var)).place(x=13, y=124)
+        ttk.Checkbutton(self.filter_frame, text="DE",  variable=self.de_var,  command=lambda: self.on_gamemode_click(self.de_var)).place(x=13, y=150)
+        ttk.Checkbutton(self.filter_frame, text="AC",  variable=self.ac_var,  command=lambda: self.on_gamemode_click(self.ac_var)).place(x=13, y=176)
+        ttk.Checkbutton(self.filter_frame, text="TH",  variable=self.th_var,  command=lambda: self.on_gamemode_click(self.th_var)).place(x=73, y=98)
+        ttk.Checkbutton(self.filter_frame, text="VIP", variable=self.vip_var, command=lambda: self.on_gamemode_click(self.vip_var)).place(x=73, y=124)
+        ttk.Checkbutton(self.filter_frame, text="CU",  variable=self.cu_var,  command=lambda: self.on_gamemode_click(self.cu_var)).place(x=73, y=150)
 
-        self.clean_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(self.root, text="Clean names", variable=self.clean_var, command=self.update_listview).place(x=427, y=256)
+        # Random map button
+        ttk.Button(self.root, text="Pick Random Map", width=14, command=self.pick_random).place(x=735, y=253, height=30)
 
-        # Random button
-        ttk.Button(self.root, text="Pick Random Map", width=16, command=self.pick_random).place(x=411, y=295, height=30)
+        # Game command radios
+        self.game_commands_frame = ttk.LabelFrame(self.root, text="Game Commands:", width=175, height=348+75)
+        self.game_commands_frame.place(x=717, y=300)
 
-        # Action radios
-        game_commands_frame = ttk.LabelFrame(self.root, text="Game Commands:", width=175, height=270)
-        game_commands_frame.place(x=402, y=358)
-
-        vote_frame = ttk.LabelFrame(game_commands_frame, text="Vote:", width=159, height=80)
+        vote_frame = ttk.LabelFrame(self.game_commands_frame, text="Vote:", width=159, height=80)
         vote_frame.place(x=8, y=0)
         vote_switch_now = ttk.Radiobutton(vote_frame, text="Change Map Now", value=1, command=self.update_action)
         vote_switch_now.place(x=2, y=2)
         vote_scramble_teams = (ttk.Radiobutton(vote_frame, text="Scramble Teams", value=2, command=self.update_action))
         vote_scramble_teams.place(x=2, y=30)
 
-        admin_frame = ttk.LabelFrame(game_commands_frame, text="Admin:", width=159, height=80)
+        admin_frame = ttk.LabelFrame(self.game_commands_frame, text="Admin:", width=159, height=158+75)
         admin_frame.place(x=8, y=80)
-        admin_set_next = ttk.Radiobutton(admin_frame, text="Set next map", value=3, command=self.update_action)
-        admin_set_next.place(x=2, y=0)
-        admin_switch_now = ttk.Radiobutton(admin_frame, text="Switch map now", value=4, command=self.update_action)
-        admin_switch_now.place(x=2, y=30)
+        admin_restart_round = ttk.Radiobutton(admin_frame, text="Restart Round", value=3, command=self.update_action)
+        admin_restart_round.place(x=2, y=0)
+        admin_force_weapon_now = ttk.Radiobutton(admin_frame, text="Force Weapon Now", value=4, command=self.update_action)
+        admin_force_weapon_now.place(x=2, y=30)
+        admin_force_weapon_next = ttk.Radiobutton(admin_frame, text="Force Weapon Next", value=5, command=self.update_action)
+        admin_force_weapon_next.place(x=2, y=60)
+        self.weapon_combo_file_var = tk.StringVar(value="None")
+        self.weapon_combo_box = ttk.Combobox(admin_frame, textvariable=self.weapon_combo_file_var, width=10,
+                                             values=["None", "AK-105", "AK-107", "CZ-Alpha", "M4A1", "M16A4", "SCAR-H", "MP7A1",
+                                                     "M870", "SuperNova", "M249", "RPK", "Dragunov", "M14", "M24",
+                                                     "SV-98", "CZ2", "M9A1", "M17", "M1911A1", "RPG", "Handgun"],
+                                             state="readonly")
+        self.weapon_combo_box.place(x=20, y=90)
+        admin_set_next = ttk.Radiobutton(admin_frame, text="Set next map", value=6, command=self.update_action)
+        admin_set_next.place(x=2, y=80 + 75)
+        admin_switch_now = ttk.Radiobutton(admin_frame, text="Switch map now", value=7, command=self.update_action)
+        admin_switch_now.place(x=2, y=110 + 75)
 
-        local_frame = ttk.LabelFrame(game_commands_frame, text="Local:", width=159, height=46)
-        local_frame.place(x=8, y=160)
-        open_map_local = ttk.Radiobutton(local_frame, text="Open Map", value=5, command=self.update_action)
+        local_frame = ttk.LabelFrame(self.game_commands_frame, text="Local:", width=159, height=46)
+        local_frame.place(x=8, y=238 + 75)
+        open_map_local = ttk.Radiobutton(local_frame, text="Open Map", value=8, command=self.update_action)
         open_map_local.place(x=2, y=0)
 
-        self.action_var = tk.IntVar(value=3)
-        for rb in (vote_switch_now, vote_scramble_teams, admin_set_next, admin_switch_now, open_map_local):
+        self.action_var = tk.IntVar(value=6)
+        for rb in (vote_switch_now, vote_scramble_teams, admin_restart_round, admin_force_weapon_now, admin_force_weapon_next, admin_set_next, admin_switch_now, open_map_local):
             rb.config(variable=self.action_var)
 
-        ttk.Button(self.root, text="Submit", width=12, command=self.submit_map).place(x=429, y=588)
+        ttk.Button(self.game_commands_frame, text="Submit", width=12, command=self.submit_command).place(x=26, y=291+75)
 
         self.root.bind("<Escape>", self.clear_search_and_filters)
 
         self.context_menu = Menu(self.root, tearoff=0)
         self.context_menu.add_command(label="Toggle Favorite", command=self.toggle_favorite)
+        self.context_menu.add_command(label="Copy Filename", command=self.copy_filename)
+
+    def preload_thumbnails(self):
+        """Preload ALL thumbnails into memory (fast with WebP)."""
+        if not os.path.exists(self.images_dir):
+            return
+
+        for filename in os.listdir(self.images_dir):
+            if not filename.lower().endswith('.webp'):
+                continue
+            image_base_name = os.path.splitext(filename)[0]
+            thumb_base_name = f"{image_base_name}_thumb"
+            try:
+                with Image.open(f"{self.thumbs_dir}\\{thumb_base_name}.webp") as pil_img2:
+                    photo = ImageTk.PhotoImage(pil_img2)
+                    self.thumbnail_images[image_base_name] = photo
+
+            except Exception as e:
+                print(f"Failed to load thumbnail {filename}: {e}")
+
+        print(f"Loaded {len(self.thumbnail_images)} thumbnails into memory.")
+
+    def unload_images(self):
+        self.thumbnail_images.clear()
+
+    def process_images(self):
+        """
+        Process all .jpg files in self.images_dir:
+        - Resize main image to 711x400 (preserving aspect ratio with letterbox)
+        - Save as WebP (lossy, quality=90) in self.images_dir
+        - Create thumbnail 228x128 as WebP in self.thumbnail_dir
+        - Delete original .jpg
+        """
+        if not os.path.exists(self.images_dir):
+            os.makedirs(self.images_dir, exist_ok=True)
+            return
+
+        if not os.path.exists(self.thumbs_dir):
+            os.makedirs(self.thumbs_dir, exist_ok=True)
+
+        jpg_files = [f for f in os.listdir(self.images_dir)
+                     if f.lower().endswith('.jpg')]
+
+        if not jpg_files:
+            # No JPGs to process — move on silently
+            return
+
+        print(f"Found {len(jpg_files)} JPG screenshot(s) to optimize...")
+
+        for filename in jpg_files:
+            jpg_path = os.path.join(self.images_dir, filename)
+            base_name = os.path.splitext(filename)[0]
+
+            webp_path = os.path.join(self.images_dir, f"{base_name}.webp")
+            thumb_path = os.path.join(self.thumbs_dir, f"{base_name}_thumb.webp")
+
+            try:
+                with Image.open(jpg_path) as img:
+                    # Convert to RGB if it has alpha (rare for Steam screenshots)
+                    if img.mode in ("RGBA", "P"):
+                        img = img.convert("RGB")
+
+                    # === Main preview: exactly 711x400 with letterboxing ===
+                    main_img = ImageOps.pad(
+                        img,
+                        (711, 400),
+                        method=Image.LANCZOS,  # Best quality downsampling
+                        color=(0, 0, 0),  # Black bars
+                        centering=(0.5, 0.5)
+                    )
+
+                    # Save as WebP (lossy)
+                    main_img.save(
+                        webp_path,
+                        "WEBP",
+                        quality=90,
+                        method=6,  # Higher compression (still fast enough on modern Pillow)
+                        lossless=False
+                    )
+
+                    # === Thumbnail: 228x128 with letterboxing ===
+                    thumb_img = ImageOps.pad(
+                        img,
+                        (228, 128),
+                        method=Image.LANCZOS,
+                        color=(0, 0, 0),
+                        centering=(0.5, 0.5)
+                    )
+
+                    thumb_img.save(
+                        thumb_path,
+                        "WEBP",
+                        quality=85,  # Slightly lower for thumbnails is fine
+                        method=6
+                    )
+
+                # Success → delete original JPG
+                os.remove(jpg_path)
+                print(f"✓ Optimized: {filename} → {base_name}.webp + thumbnail")
+
+            except Exception as e:
+                print(f"✗ Failed to process {filename}: {e}")
+                # Optionally continue or raise — here we continue so one bad file doesn't stop everything
+
+        print("Image processing complete.")
+
+    def on_tree_hover(self, event):
+        if not self.thumb_var.get():
+            self.hide_hover_popup()
+            return
+
+        # Get row and column under the mouse
+        row_id = self.tree.identify_row(event.y)
+        col_id = self.tree.identify_column(event.x)
+
+        # Only show popup when hovering over the thumbnail column (#0)
+        if not row_id or col_id != "#0":
+            self.hide_hover_popup()
+            return
+
+        # Get map_name from hidden column
+        values = self.tree.item(row_id, "values")
+        if not values:
+            self.hide_hover_popup()
+            return
+
+        map_name = values[0].lower()
+
+        # Small delay to avoid flickering when moving mouse quickly
+        if self.hover_after_id:
+            self.root.after_cancel(self.hover_after_id)
+
+        if not self.active_popup == map_name:
+            self.hover_after_id = self.root.after(50,
+                lambda: self.show_large_preview(map_name, event))
+
+    def on_tree_leave(self, event=None):
+        """Hide popup when mouse leaves the Treeview."""
+        self.hide_hover_popup()
+
+    def show_large_preview(self, map_name: str, event):
+        """Show a larger version of the thumbnail near the mouse."""
+        self.hide_hover_popup()  # close any existing one
+        self.active_popup = map_name
+
+        image_path = self.images_dir / f"{map_name}.webp"
+        if not image_path.exists():
+            return
+
+        photo = None
+        try:
+            with Image.open(image_path) as pil_img:
+                photo = ImageTk.PhotoImage(pil_img)
+
+            # Create a small top-level popup window
+            self.hover_popup = tk.Toplevel(self.root)
+            self.hover_popup.overrideredirect(True)        # no title bar
+            self.hover_popup.attributes("-topmost", True)
+
+            label = ttk.Label(self.hover_popup, image=photo)
+            label.image = photo                            # keep strong reference
+            label.pack(padx=4, pady=4)
+
+            # Position near the mouse (with offset so it doesn't cover the cursor)
+            x = self.root.winfo_pointerx() + 20
+            y = self.root.winfo_pointery()
+            if not self.root.winfo_pointery() > 600:
+                self.hover_popup.geometry(f"+{x}+{y+20}")
+            else:
+                self.hover_popup.geometry(f"+{x}+{y-400-20}")
+
+        except Exception as e:
+            print(f"Failed to show large preview for {map_name}: {e}")
+
+    def hide_hover_popup(self):
+        """Safely close the hover popup."""
+        self.active_popup = None
+
+        if self.hover_after_id:
+            self.root.after_cancel(self.hover_after_id)
+            self.hover_after_id = None
+
+        if self.hover_popup:
+            self.hover_popup.destroy()
+            self.hover_popup = None
 
     def show_folder_paths(self):
         FolderPathsDialog(self)
@@ -598,6 +839,21 @@ class AAPGMapBrowser:
             self.selected_map = self.tree.item(item)["values"][0]
             self.context_menu.post(event.x_root, event.y_root)
 
+    def copy_filename(self):
+        """Copy the full map name (not the cleaned display name) to clipboard"""
+        if not self.selected_map:
+            return
+
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(self.selected_map)
+            self.root.update()  # makes clipboard update immediate on some systems
+
+            messagebox.showinfo("Copied", f"Copied to clipboard:\n{self.selected_map}",
+                                parent=self.root)
+        except Exception as e:
+            messagebox.showerror("Copy Failed", f"Could not copy to clipboard:\n{str(e)}")
+
     def toggle_favorite(self):
         if not self.selected_map:
             return
@@ -617,11 +873,13 @@ class AAPGMapBrowser:
         self.selected_map = self.tree.item(random_item)["values"][0]
 
     def update_listview(self):
+
         for item in self.tree.get_children():
             self.tree.delete(item)
 
         search_text = self.search_var.get().strip().lower()
         clean_names = self.clean_var.get()
+        thumbs_enabled = self.thumb_var.get()
 
         any_filter = any([
             self.fav_var.get(), self.bdx_var.get(), self.flo_var.get(),
@@ -662,13 +920,27 @@ class AAPGMapBrowser:
                 if self.vip_var.get() and mode != "VIP": meets = False
                 if self.cu_var.get()  and mode != "CU":  meets = False
 
+            photo = None
             if meets:
-                displayed.append((map_name, display_name, map_type, mode, fav_str))
+
+                if thumbs_enabled:
+                        photo = self.thumbnail_images.get(map_name)
+
+                if photo is not None:
+                    displayed.append((map_name, display_name, map_type, mode, fav_str, photo))
+                else:
+                    displayed.append((map_name, display_name, map_type, mode, fav_str))
 
         displayed.sort(key=lambda x: x[1])
 
         for item in displayed:
-            self.tree.insert("", "end", values=item)
+            if len(item) > 5:
+                self.tree.insert("", "end",
+                             values=(item[0], item[1], item[2], item[3], item[4]),
+                             image=item[5])
+            else:
+                self.tree.insert("", "end",
+                                 values=(item[0], item[1], item[2], item[3], item[4]))
 
         self.map_count_label.config(text=f"{len(displayed)}")
 
@@ -785,6 +1057,7 @@ class AAPGMapBrowser:
                 self.workshop_path = config["Settings"].get("WorkshopPath", "")
                 self.last_map_file = config["Settings"].get("LastMapFile", "")
                 self.dark_mode = config["Settings"].getboolean("DarkMode", False)
+                self.image_mode = config["Settings"].getboolean("ImageMode", False)
 
     def save_config(self):
         """Save all settings to config.ini"""
@@ -793,7 +1066,8 @@ class AAPGMapBrowser:
             "AAClientLog": self.aaclient_log_path,
             "WorkshopPath": self.workshop_path,
             "LastMapFile": self.last_map_file,
-            "DarkMode": str(self.dark_mode)
+            "DarkMode": str(self.dark_mode),
+            "ImageMode": str(self.thumb_var.get())
         }
 
         with get_appdata_path("config.ini").open("w", encoding="utf-8") as f:
@@ -837,6 +1111,40 @@ class AAPGMapBrowser:
         self.aaclient_log_found = self.validate_aaclient_log(self.aaclient_log_path)
         self.workshop_content_found = self.validate_workshop_path(self.workshop_path)
 
+    def toggle_image_mode(self):
+        # Fix persistent blue highlight on readonly Combobox
+        style = ttk.Style()
+
+        # If image_mode enabled
+        if self.thumb_var.get():
+            style.configure("Treeview", rowheight=130)
+            self.tree.column("#0", width=233, stretch=False, anchor="center")
+            self.tree.column("Map Name", width=250, anchor="w")
+        else:
+            style.configure("Treeview", rowheight=25)
+            self.tree.column("#0", width=0, stretch=False, anchor="center")
+            self.tree.column("Map Name", width=483, anchor="w")
+
+        self.tree.column("hidden", width=0, stretch=False)
+        self.tree.column("Type", width=15, anchor="center")
+        self.tree.column("Mode", width=15, anchor="center")
+        self.tree.column("Favorite", width=15, anchor="center")
+
+        style.configure("Treeview", indent=4)  # Default is usually 20+. 4 is very tight.
+        style.layout("Treeview.Item",
+                     [('Treeitem.padding', {'sticky': 'nswe',
+                                            'children': [('Treeitem.image', {'sticky': 'w'}),
+                                                         ('Treeitem.text', {'sticky': 'w'})]})])
+        # Optional: even more aggressive padding control on items
+        style.configure("Treeview.Item", padding=(2, 4))
+
+        self.save_config()
+        if self.thumb_var.get():
+            self.preload_thumbnails()
+        else:
+            self.unload_images()
+        self.update_listview()
+
     def toggle_dark_mode(self):
         self.dark_mode = self.dark_var.get()
         theme = "dark" if self.dark_mode else "light"
@@ -844,6 +1152,18 @@ class AAPGMapBrowser:
 
         # Fix persistent blue highlight on readonly Combobox
         style = ttk.Style()
+
+        if self.thumb_var:
+            style.configure("Treeview", rowheight=130)
+        else:
+            style.configure("Treeview", rowheight=25)
+        style.configure("Treeview", indent=4)  # Default is usually 20+. 4 is very tight.
+        style.layout("Treeview.Item",
+                     [('Treeitem.padding', {'sticky': 'nswe',
+                                            'children': [('Treeitem.image', {'sticky': 'w'}),
+                                                         ('Treeitem.text', {'sticky': 'w'})]})])
+        # Optional: even more aggressive padding control on items
+        style.configure("Treeview.Item", padding=(2, 4))
 
         if theme == "dark":
             style.map("TCombobox",
@@ -858,11 +1178,11 @@ class AAPGMapBrowser:
 
         self.save_config()
 
-    def submit_map(self):
-        if self.map_action not in (1, 2, 3, 4, 5):
+    def submit_command(self):
+        if self.map_action not in (1, 2, 3, 4, 5, 6, 7, 8):
             return
 
-        if self.map_action != 2 and not self.selected_map:
+        if self.map_action in (1,6,7,8) and not self.selected_map:
             messagebox.showerror("Error", "Please select a map.")
             return
 
@@ -872,10 +1192,16 @@ class AAPGMapBrowser:
         elif self.map_action == 2:
             cmd = "votescrambleteams"
         elif self.map_action == 3:
-            cmd = f"adminsetnextmap {self.selected_map}"
+            cmd = "adminrestartround"
         elif self.map_action == 4:
-            cmd = f"adminswitchmap {self.selected_map}"
+            cmd = f"forceweapon {self.weapon_combo_box.get()} True"
         elif self.map_action == 5:
+            cmd = f"forceweapon {self.weapon_combo_box.get()} False"
+        elif self.map_action == 6:
+            cmd = f"adminsetnextmap {self.selected_map}"
+        elif self.map_action == 7:
+            cmd = f"adminswitchmap {self.selected_map}"
+        elif self.map_action == 8:
             cmd = f"open {self.selected_map}"
 
         if cmd:
